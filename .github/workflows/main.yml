@@ -6,6 +6,8 @@ on:
 
 permissions:
   issues: write
+  contents: write
+  pull-requests: write
 
 jobs:
   # ジョブの名前を「司令塔」や「分配係」のように汎用的にする
@@ -13,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # ステップ1: Logosを起動する (initiate-proposal ラベルの場合)
+      - name: Checkout repository
+        uses: actions/checkout@v4
       - name: Invoke Logos for Initial Proposal
         # if条件は、どのラベルでどのエージェントを呼ぶかの「司令」
         if: github.event.label.name == 'initiate-proposal'
