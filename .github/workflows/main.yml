@@ -1,58 +1,47 @@
-# ワークフローの名前（GitHubのActionsタブで表示される）
-name: AXEL-Strategy-Partner-Workflow
+name: AXEL-Orchestrator-Workflow
 
-# ワークフローが起動する「きっかけ」（トリガー）
 on:
   issues:
-    types: [labeled] # Issueにラベルが貼られたとき
+    types: [labeled]
 
-# このワークフローに与える権限を設定
 permissions:
-  issues: write # Issueに対する書き込み権限を許可する
+  issues: write
 
-# 実行される一連の「仕事」（ジョブ）
 jobs:
-  # ジョブの名前（好きな名前を付けられる）
-  run-logos-agent:
-    # このジョブが動くための「条件」
-    # "initiate-proposal" という名前のラベルが貼られたときだけ実行する
-    if: github.event.label.name == 'initiate-proposal'
-    
-    # ジョブを実行する仮想マシンの種類を指定（最新のUbuntu）
+  # ジョブの名前を「司令塔」や「分配係」のように汎用的にする
+  agent-dispatcher:
     runs-on: ubuntu-latest
-
-    # ジョブの具体的な「手順」（ステップ）
     steps:
-      # ステップ1: リポジトリのコードを仮想マシンにコピーする
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # ステップ2: Pythonの実行環境をセットアップする
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # ステップ1: Logosを起動する (initiate-proposal ラベルの場合)
+      - name: Invoke Logos for Initial Proposal
+        # if条件は、どのラベルでどのエージェントを呼ぶかの「司令」
+        if: github.event.label.name == 'initiate-proposal'
+        id: logos_job
+        # ★変更点！ 新しい汎用アクションを呼び出す
+        uses: ./.github/actions/run-python-agent
         with:
-          python-version: '3.12' # あなたがインストールしたバージョンに近いもの
+          # 実行させたいPythonスクリプトのパスをここで指定
+          agent_script_path: src/logos_agent.py
+          # 以下は、アクションに渡す情報
+          triggering_label: ${{ github.event.label.name }}
+          issue_title: ${{ github.event.issue.title }}
+          issue_body: ${{ github.event.issue.body }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
 
-      # ステップ3: Pythonのライブラリ（openai）をインストールする
-      - name: Install dependencies
-        run: pip install openai
+      # (将来、Athenaをここに追加する場合のイメージ)
+      # - name: Invoke Athena for Research Planning
+      #   if: github.event.label.name == 'plan-research'
+      #   id: athena_job
+      #   uses: ./.github/actions/run-python-agent
+      #   with:
+      #     agent_script_path: src/athena_agent.py
+      #     ... (必要な情報を渡す) ...
 
-      # ステップ4: Logosエージェント（Pythonスクリプト）を実行する
-      - name: Run Logos Agent to generate proposal plan
-        id: logos_step # このステップにIDを付けて、出力を後で参照できるようにする
-        run: python src/logos_agent.py
-        env:
-          # Pythonスクリプトに環境変数として情報を渡す
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
-
-      # ステップ5: Logosの実行結果を、元のIssueにコメントとして投稿する
-      - name: Create comment on Issue with Logos's plan
+      # ステップ2: エージェントからの出力をIssueにコメントする
+      - name: Post Comment to Issue
+        # Logosのジョブが何かしらの結果を出した場合に実行
+        if: steps.logos_job.outputs.comment_body
         uses: peter-evans/create-or-update-comment@v4
         with:
-          # どのIssueにコメントするかを指定
           issue-number: ${{ github.event.issue.number }}
-          # コメントの内容を指定
-          # logos_stepというIDを付けたステップの出力（proposal_plan）を参照している
-          body: ${{ steps.logos_step.outputs.proposal_plan }}
+          body: ${{ steps.logos_job.outputs.comment_body }}

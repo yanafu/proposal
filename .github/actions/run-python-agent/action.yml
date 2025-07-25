@@ -1,0 +1,57 @@
+# 部品の名前
+name: 'Run Python Agent'
+# 部品の説明
+description: 'Sets up a Python environment and executes a specified agent script.'
+
+# この部品が受け取る「引数」（入力情報）
+inputs:
+  agent_script_path: # ★新設！ 実行するPythonスクリプトのパス
+    description: 'Path to the Python agent script to run (e.g., src/logos_agent.py)'
+    required: true
+  triggering_label:
+    description: 'The label that triggered the workflow'
+    required: true
+  issue_title:
+    description: 'Title of the triggering issue'
+    required: true
+  issue_body:
+    description: 'Body of the triggering issue'
+    required: true
+  openai_api_key:
+    description: 'OpenAI API Key'
+    required: true
+
+# この部品が返す「結果」（出力情報）
+outputs:
+  comment_body:
+    description: "The body of the comment to be posted by the agent"
+    value: ${{ steps.agent_script.outputs.comment_body }}
+
+# この部品の具体的な実行手順
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: pip install openai
+      shell: bash
+
+    - name: Run Agent Script
+      id: agent_script # 汎用的なID名に変更
+      # ★変更点！ 引数で渡されたパスのスクリプトを実行する
+      run: python ${{ inputs.agent_script_path }}
+      shell: bash
+      env:
+        # スクリプトに渡す環境変数
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        INPUT_TRIGGERING_LABEL: ${{ inputs.triggering_label }}
+        ISSUE_TITLE: ${{ inputs.issue_title }}
+        ISSUE_BODY: ${{ inputs.issue_body }}

@@ -3,20 +3,21 @@ import sys
 from openai import OpenAI
 
 # --------------------------------------------------------------------------
-# 1. 初期設定：環境変数から情報を受け取る
+# 1. 初期設定と状況認識
 # --------------------------------------------------------------------------
 api_key = os.environ.get("OPENAI_API_KEY")
-issue_title = os.environ.get("ISSUE_TITLE")
-issue_body = os.environ.get("ISSUE_BODY")
+# GitHub Actionsが提供するイベント情報を取得
+github_event_name = os.environ.get("GITHUB_EVENT_NAME")
+triggering_label = os.environ.get("INPUT_TRIGGERING_LABEL") # ワークフローから受け取るラベル名
 
-if not all([api_key, issue_title, issue_body]):
-    print("エラー: 必要な環境変数（OPENAI_API_KEY, ISSUE_TITLE, ISSUE_BODY）が設定されていません。")
+if not api_key:
+    print("エラー: 環境変数 OPENAI_API_KEY が設定されていません。")
     sys.exit(1)
 
 client = OpenAI(api_key=api_key)
 
 # --------------------------------------------------------------------------
-# 2. プロンプトの設計：外部ファイルから人格を読み込み、指示を組み立てる
+# 2. 人格のロード：Logosの憲法を読み込む
 # --------------------------------------------------------------------------
 try:
     with open("prompts/logos_pm.md", "r", encoding="utf-8") as f:
@@ -25,21 +26,42 @@ except FileNotFoundError:
     print("エラー: プロンプトファイル prompts/logos_pm.md が見つかりません。")
     sys.exit(1)
 
-# Logosへの具体的な指示を組み立てる
-user_prompt = f"""
-以下の新規案件について、あなたが定義された役割に基づき、提案活動の初期設計（ロードマップと最初のアクション提案）を行ってください。
+# --------------------------------------------------------------------------
+# 3. 動的タスク指示書の生成
+# --------------------------------------------------------------------------
+user_prompt = ""
 
-# 案件名
-{issue_title}
+#【分岐A】"initiate-proposal"ラベルが貼られて呼ばれた場合
+if github_event_name == "issues" and triggering_label == 'initiate-proposal':
+    issue_title = os.environ.get("ISSUE_TITLE")
+    issue_body = os.environ.get("ISSUE_BODY")
 
-# 初期情報（営業からの議事録など）
-{issue_body}
-"""
+    if not issue_title or not issue_body:
+        print("エラー: Issueのタイトルまたは本文が取得できませんでした。")
+        sys.exit(1)
+
+    user_prompt = f"""
+    # タスク指示: 新規案件の初期設計
+
+    あなたは今、新しい案件のキックオフを任されました。
+    あなたの思考OSと、以下の案件情報に基づき、「案件初期設計プラン」を作成してください。
+    アウトプットには、あなたの署名を必ず含めてください。
+
+    ## 案件情報
+    - 案件名: {issue_title}
+    - 初期情報: {issue_body}
+    """
+
+# (将来的に、他の分岐（issue_commentなど）をここに追加していく)
 
 # --------------------------------------------------------------------------
-# 3. APIの実行：Logosに思考させ、結果を受け取る
+# 4. API実行と出力
 # --------------------------------------------------------------------------
-print(f"司令塔「Logos」が、案件「{issue_title}」の初期設計を開始しました...")
+if not user_prompt:
+    print("適切なタスクがありません。処理を終了します。")
+    sys.exit(0)
+
+print(f"司令塔「Logos」がタスクを開始しました... (Event: {github_event_name}, Label: {triggering_label})")
 
 try:
     response = client.chat.completions.create(
@@ -48,19 +70,16 @@ try:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        temperature=0.7, # 構造化された中にも、ある程度の創造性を許容
-        max_tokens=1500  # 提案内容を十分に記述できるトークン数を確保
+        temperature=0.7,
+        max_tokens=2000
     )
     ai_response = response.choices[0].message.content
-    print("Logosによる初期設計が完了しました。")
+    print("Logosによるタスクが完了しました。")
     
-    # --------------------------------------------------------------------------
-    # 4. 結果の出力：後続のステップで使えるように結果を出力する
-    # --------------------------------------------------------------------------
-    # この特殊な形式で出力すると、GitHub Actionsの次のステップでこの結果を使える
+    # 結果をGitHub Actionsの出力に設定
     with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-        print(f'proposal_plan<<EOF', file=f)
-        print(f"🤖 **司令塔 Logosより：**\n\n{ai_response}", file=f)
+        print(f'comment_body<<EOF', file=f)
+        print(ai_response, file=f)
         print('EOF', file=f)
 
 except Exception as e:
