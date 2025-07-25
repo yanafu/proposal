@@ -6,6 +6,10 @@ on:
   issues:
     types: [labeled] # Issueにラベルが貼られたとき
 
+# このワークフローに与える権限を設定
+permissions:
+  issues: write # Issueに対する書き込み権限を許可する
+
 # 実行される一連の「仕事」（ジョブ）
 jobs:
   # ジョブの名前（好きな名前を付けられる）
