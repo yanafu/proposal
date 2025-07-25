@@ -1,51 +1,103 @@
+# ワークフロー全体の名前
 name: AXEL-Orchestrator-Workflow
 
+# このワークフローが起動する「きっかけ」
 on:
   issues:
-    types: [labeled]
+    types: [labeled] # Issueにラベルが貼られたとき
 
+# このワークフローに与える「権限」
 permissions:
-  issues: write
-  contents: write
-  pull-requests: write
+  contents: write       # ブランチの作成やファイルコミットに必要
+  pull-requests: write  # Pull Requestの作成に必要
+  issues: write         # Issueへのコメント投稿に必要
 
+# 実行される「仕事」の定義
 jobs:
-  # ジョブの名前を「司令塔」や「分配係」のように汎用的にする
+  # ジョブの名前
   agent-dispatcher:
+    # 実行する仮想マシンの種類
     runs-on: ubuntu-latest
+    # このジョブが実行される「条件」
+    if: github.event.label.name == 'initiate-proposal'
+    # 具体的な「手順」
     steps:
-      # ステップ1: Logosを起動する (initiate-proposal ラベルの場合)
+      # ステップ1: リポジトリのコードを作業スペースにコピーする
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Invoke Logos for Initial Proposal
-        # if条件は、どのラベルでどのエージェントを呼ぶかの「司令」
-        if: github.event.label.name == 'initiate-proposal'
-        id: logos_job
-        # ★変更点！ 新しい汎用アクションを呼び出す
-        uses: ./.github/actions/run-python-agent
+
+      # ステップ2: Pythonの実行環境を整える
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          # 実行させたいPythonスクリプトのパスをここで指定
-          agent_script_path: src/logos_agent.py
-          # 以下は、アクションに渡す情報
-          triggering_label: ${{ github.event.label.name }}
-          issue_title: ${{ github.event.issue.title }}
-          issue_body: ${{ github.event.issue.body }}
-          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          python-version: '3.12'
 
-      # (将来、Athenaをここに追加する場合のイメージ)
-      # - name: Invoke Athena for Research Planning
-      #   if: github.event.label.name == 'plan-research'
-      #   id: athena_job
-      #   uses: ./.github/actions/run-python-agent
-      #   with:
-      #     agent_script_path: src/athena_agent.py
-      #     ... (必要な情報を渡す) ...
+      # ステップ3: 必要なPythonライブラリをインストールする
+      - name: Install dependencies
+        run: pip install openai
 
-      # ステップ2: エージェントからの出力をIssueにコメントする
-      - name: Post Comment to Issue
-        # Logosのジョブが何かしらの結果を出した場合に実行
-        if: steps.logos_job.outputs.comment_body
+      # ステップ4: Logosエージェント（Pythonスクリプト）を実行する
+      - name: Run Logos Agent
+        id: logos_step # このステップにIDを付けて、後で出力を参照できるようにする
+        run: python src/logos_agent.py
+        env:
+          # Pythonスクリプトに渡す環境変数
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          INPUT_TRIGGERING_LABEL: ${{ github.event.label.name }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+
+      # ステップ5: Logosの成果物（ステータスボード）をファイルとして書き出す
+      - name: Write agent outputs to file
+        # logos_stepが成功した場合のみ実行
+        if: steps.logos_step.outputs.agent_outputs
+        run: |
+          # 案件ごとのフォルダ（例: projects/1）がなければ作成
+          mkdir -p projects/${{ github.event.issue.number }}
+          # PythonからのJSON出力をパースし、status_file_contentの内容をファイルに書き出す
+          echo '${{ fromJson(steps.logos_step.outputs.agent_outputs).status_file_content }}' > projects/${{ github.event.issue.number }}/project_status.md
+        shell: bash
+
+      # ステップ6: 書き出したファイルを含むPull Requestを作成する
+      - name: Create Project Status Pull Request
+        # logos_stepが成功した場合のみ実行
+        if: steps.logos_step.outputs.agent_outputs
+        id: create_pr # このステップにIDを付けて、後でPR番号などを参照する
+        uses: peter-evans/create-pull-request@v6
+        with:
+          # GitHub Actionsが自動生成する認証トークン
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # コミットメッセージ（Pythonからの出力を使う）
+          commit-message: ${{ fromJson(steps.logos_step.outputs.agent_outputs).pr_title }}
+          # PRのタイトル（Pythonからの出力を使う）
+          title: ${{ fromJson(steps.logos_step.outputs.agent_outputs).pr_title }}
+          # PRの本文（Pythonからの出力を使う）
+          body: ${{ fromJson(steps.logos_step.outputs.agent_outputs).pr_body }}
+          # PRのブランチ名（案件ごとにユニークにする）
+          branch: feature/project-${{ github.event.issue.number }}
+          # PRのベースとなるブランチ
+          base: main
+          # PRにレビュー担当者を割り当てる（Issueを作成した人）
+          reviewers: ${{ github.actor }}
+          # コミット対象に含めるファイルを指定
+          add-paths: projects/${{ github.event.issue.number }}/project_status.md
+
+      # ステップ7: 元のIssueに「報告コメント」を投稿する
+      - name: Post PR link to Issue
+        # PR作成ステップが成功し、PR番号が取得できた場合のみ実行
+        if: steps.create_pr.outputs.pull-request-number
         uses: peter-evans/create-or-update-comment@v4
         with:
+          # どのIssueにコメントするか
           issue-number: ${{ github.event.issue.number }}
-          body: ${{ steps.logos_job.outputs.comment_body }}
+          # コメントの内容
+          body: |
+            🤖 **司令塔 Logosより：**
+
+            @${{ github.actor }}
+            初期設計が完了し、プロジェクト管理のためのPull Requestを作成しました。
+
+            内容をご確認の上、レビューをお願いします。
+            👉 **[Pull Request #${{ steps.create_pr.outputs.pull-request-number }}](${{ steps.create_pr.outputs.pull-request-url }})**

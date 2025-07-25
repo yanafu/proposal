@@ -84,8 +84,6 @@ if github_event_name == "issues" and triggering_label == 'initiate-proposal':
     """
 
 # (将来的に、他のイベントやラベルに応じた分岐をここに追加していく)
-# elif github_event_name == "issues" and triggering_label == 'status-report':
-#     user_prompt = "..."
 
 # --------------------------------------------------------------------------
 # 3. API実行と後処理
@@ -117,12 +115,10 @@ try:
     print("LogosによるJSONレスポンスの生成が完了しました。")
     
     # --- 成果物の組み立て ---
-    # Pythonオブジェクトから各情報を取り出す（.get()を使うとキーが存在しなくてもエラーにならない）
     pr_title = ai_outputs.get("pull_request_title", f"AI Agent Proposal for Issue #{os.environ.get('ISSUE_NUMBER', '')}")
     pr_body = ai_outputs.get("pull_request_body", "エラー: PR本文を生成できませんでした。")
     status_data = ai_outputs.get("status_board_content", {})
 
-    # project_status.md ファイルの内容を動的に組み立てる
     status_md = f"""# プロジェクト: {status_data.get('project_name', issue_title)}
 
 - **ステータス:** {status_data.get('status', 'N/A')}
@@ -150,6 +146,5 @@ try:
         print(f"agent_outputs={json.dumps(final_outputs)}", file=f)
 
 except Exception as e:
-    # API呼び出しなどでエラーが発生した場合
     print(f"処理中にエラーが発生しました: {e}")
     sys.exit(1)

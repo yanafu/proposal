@@ -1,0 +1,22 @@
+name: AXEL-PR-Comment-Handler
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  handle-pr-comment:
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '@Logos')
+    runs-on: ubuntu-latest
+    steps:
+      # このワークフローでも、まずリポジトリのコードが必要
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # (ここに、意図分類と、それに応じた修正を行うためのPythonスクリプトを呼び出すステップを追加します)
+      # (プロトタイプの段階では、まずこのワークフローが正しく起動するかを確認するのが目標です)
+      - name: Acknowledge comment (Prototype)
+        run: echo "PR Comment received for Logos! Intent classification and revision logic will be implemented here."
